@@ -1,6 +1,6 @@
 # Custom
 /ml-100k
-/cora
+/cora/*
 /pubmed-data/Pub*
 
 *.csv
