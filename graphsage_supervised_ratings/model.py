@@ -64,28 +64,8 @@ def load_movielens():
             rating = int(pair[2])
             # rating_list[(user+1682, movie)] = [1, 0] if rating >= LIKE_THRESHOLD else [0, 1]
             rating_list[(user + 1682, movie)] = 1 if rating >= LIKE_THRESHOLD else 0
-            # if user not in user_map.keys():
-            #     user_map[user] = len(user_map)
-            # if movie not in movie_map.keys():
-            #     movie_map[movie] = len(movie_map) + 943
-            # Users and items are numbered consecutively from 1.
             adj_list[user+1682].add(movie)
             adj_list[movie].add(user+1682)
-            # movie2user[movie_map[movie]].add(user_map[user])
-        # print(adj_lists[943])
-        # print(movie_map)
-
-    # network: user2user the neighbors of movies are still movies
-    # for i in movie2user.keys():
-    #     for j in movie2user.keys():
-    #         if i != j:
-    #             for i_item in movie2user[i]:
-    #                 if i_item in movie2user[j]:
-    #                     adj_lists[i].add(j)
-    #                     break
-    # for i in range(len(adj_lists)):
-    #     print(len(adj_lists[i]))
-    # feat_data = np.random.rand(num_nodes, num_nodes)
     feat_data = np.eye(num_nodes)
     # print(rating_list)
     return feat_data, rating_list, adj_list
@@ -117,7 +97,7 @@ def run_movielens():
     train = list(rand_indices[:1682])  # train list contains the movie nodes
     # train2 = train.copy()
 
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, graphsage.parameters()), lr=0.1, momentum=0.9)
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, graphsage.parameters()), lr=0.01, momentum=0.9)
     # times = []
     for batch in range(100000):
         batch_nodes = train[:1]  # movie node
