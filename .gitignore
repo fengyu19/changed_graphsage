@@ -1,4 +1,8 @@
 # Custom
+/ml-100k
+/cora
+/pubmed-data/Pub*
+
 *.csv
 *.idea
 *.png
@@ -106,5 +110,4 @@ ENV/
 .ropeproject
 
 *.pickle
-*.pkl
-
+*.pk

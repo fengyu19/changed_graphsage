@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn import init
 from torch.autograd import Variable
 
+import os
 import numpy as np
 import time
 import random
@@ -28,6 +29,7 @@ class SupervisedGraphSage(nn.Module):
         init.xavier_uniform(self.weight)
 
     def forward(self, nodes):
+        # in the paper there is no fc layer in the end
         embeds = self.enc(nodes)
         scores = self.weight.mm(embeds)
         return scores.t()
@@ -43,23 +45,28 @@ def load_cora():
     labels = np.empty((num_nodes,1), dtype=np.int64)
     node_map = {}
     label_map = {}
-    with open("cora/cora.content") as fp:
+    with open("./cora.content", 'r') as fp:
         for i,line in enumerate(fp):
-            info = line.strip().split()
-            feat_data[i,:] = map(float, info[1:-1])
+            info = line.strip().split('\t')
+            feat_data[i, :] = [float(i) for i in info[1:-1]]
+            # feat_data[i,:] = map(float, info[1:-1])
             node_map[info[0]] = i
             if not info[-1] in label_map:
                 label_map[info[-1]] = len(label_map)
             labels[i] = label_map[info[-1]]
 
     adj_lists = defaultdict(set)
-    with open("cora/cora.cites") as fp:
+    with open(os.path.abspath("./cora.cites")) as fp:
         for i,line in enumerate(fp):
             info = line.strip().split()
             paper1 = node_map[info[0]]
             paper2 = node_map[info[1]]
             adj_lists[paper1].add(paper2)
             adj_lists[paper2].add(paper1)
+    # we do not care the weight of the edge in the condition of citation, \
+    # one paper just be cited only one time by another paper. \
+    # However, in the condition of our user-item recommendation system,\
+    # we have to redefine the edge, this part we have to discuss.
     return feat_data, labels, adj_lists
 
 def run_cora():
@@ -93,17 +100,17 @@ def run_cora():
         random.shuffle(train)
         start_time = time.time()
         optimizer.zero_grad()
-        loss = graphsage.loss(batch_nodes, 
+        loss = graphsage.loss(batch_nodes,
                 Variable(torch.LongTensor(labels[np.array(batch_nodes)])))
         loss.backward()
         optimizer.step()
         end_time = time.time()
         times.append(end_time-start_time)
-        print batch, loss.data[0]
+        print(batch, loss.data)
 
     val_output = graphsage.forward(val) 
-    print "Validation F1:", f1_score(labels[val], val_output.data.numpy().argmax(axis=1), average="micro")
-    print "Average batch time:", np.mean(times)
+    print("Validation F1:", f1_score(labels[val], val_output.data.numpy().argmax(axis=1), average="micro"))
+    print("Average batch time:", np.mean(times))
 
 def load_pubmed():
     #hardcoded for simplicity...
@@ -171,11 +178,11 @@ def run_pubmed():
         optimizer.step()
         end_time = time.time()
         times.append(end_time-start_time)
-        print batch, loss.data[0]
+        print(batch, loss.data[0])
 
     val_output = graphsage.forward(val) 
-    print "Validation F1:", f1_score(labels[val], val_output.data.numpy().argmax(axis=1), average="micro")
-    print "Average batch time:", np.mean(times)
+    print("Validation F1:", f1_score(labels[val], val_output.data.numpy().argmax(axis=1), average="micro"))
+    print("Average batch time:", np.mean(times))
 
 if __name__ == "__main__":
     run_cora()
