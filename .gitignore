@@ -2,7 +2,9 @@
 /ml-100k
 /cora/*
 /pubmed-data/Pub*
-
+/models
+embedding_results
+.scores.pkl
 *.csv
 *.idea
 *.png
