@@ -9,6 +9,7 @@ import random
 from sklearn.metrics import f1_score
 from collections import defaultdict
 import pickle
+import json
 
 from graphsage_supervised.encoders import Encoder
 from graphsage_supervised.aggregators import MeanAggregator
@@ -18,7 +19,9 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 CLASS_NUM = 2
 LIKE_THRESHOLD = 3
-
+USER_NUM = 943
+MOVIE_NUM = 1682
+NODES_NUM = USER_NUM + MOVIE_NUM
 
 class SupervisedGraphSage(nn.Module):
 
@@ -42,6 +45,7 @@ class SupervisedGraphSage(nn.Module):
 
     def loss(self, movie_nodes, user_nodes, labels):
         movie_embeds, user_embeds, scores = self.forward(movie_nodes, user_nodes)
+        print(self.xent(scores.cuda(), torch.from_numpy(labels).cuda()).item())
         return self.xent(scores.cuda(), torch.from_numpy(labels).cuda())
         # return self.xent(torch.sigmoid(scores.cuda()), torch.FloatTensor(labels.squeeze()).cuda())
 
@@ -55,7 +59,6 @@ def load_movielens():
     # {(user, movie) : rating}
     rating_list = defaultdict()
     # the dataset contains 943 users and 1682 movies
-    num_nodes = 943+1682
 
     with open(os.path.abspath('../ml-100k/u.data'), 'r') as u_f:
         for i, each_pair in enumerate(u_f.readlines()):
@@ -65,9 +68,9 @@ def load_movielens():
             rating = int(pair[2])
             # rating_list[(user+1682, movie)] = [1, 0] if rating >= LIKE_THRESHOLD else [0, 1]
             rating_list[(user + 1682, movie)] = 1 if rating >= LIKE_THRESHOLD else 0
-            adj_list[user+1682].add(movie)
-            adj_list[movie].add(user+1682)
-    feat_data = np.eye(num_nodes)
+            adj_list[user + 1682].add(movie)
+            adj_list[movie].add(user + 1682)
+    feat_data = np.eye(NODES_NUM)
     # print(rating_list)
     return feat_data, rating_list, adj_list
 
@@ -75,16 +78,13 @@ def load_movielens():
 def run_movielens():
     np.random.seed(1)
     random.seed(1)
-    num_nodes = 2625
-    movie_nodes = 1682
     feat_data, rating_list, adj_list = load_movielens()
-    # print(labels)
-    features = nn.Embedding(num_nodes, num_nodes)
+    features = nn.Embedding(NODES_NUM, NODES_NUM)
     features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=True)
     features.cuda()
 
     agg1 = MeanAggregator(features, cuda=True)
-    enc1 = Encoder(features, num_nodes, 100, adj_list, agg1, gcn=True, cuda=True)
+    enc1 = Encoder(features, NODES_NUM, 100, adj_list, agg1, gcn=True, cuda=True)
     agg2 = MeanAggregator(lambda nodes: enc1(nodes).t(), cuda=True)
     enc2 = Encoder(lambda nodes: enc1(nodes).t(), enc1.embed_dim, 100, adj_list, agg2,
                    base_model=enc1, gcn=True, cuda=True)
@@ -93,18 +93,16 @@ def run_movielens():
 
     graphsage = SupervisedGraphSage(CLASS_NUM, enc2)
     graphsage.cuda()
-    rand_indices = np.random.permutation(movie_nodes)
+    rand_indices = np.random.permutation(MOVIE_NUM)
     # test = rand_indices[:10]
     # val = rand_indices[10:100]
-    train = list(rand_indices[:movie_nodes])  # train list contains the movie nodes
+    train = list(rand_indices[:MOVIE_NUM])  # train list contains the movie nodes
     # train2 = train.copy()
 
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, graphsage.parameters()), lr=0.001, momentum=0.9)
-    # times = []
-    for batch in range(10):
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, graphsage.parameters()), lr=0.01)
+    for batch in range(100000):
         batch_nodes = train[:1]  # movie node
         random.shuffle(train)
-        # start_time = time.time()
         user_node = random.sample(adj_list[batch_nodes[0]], 1) # user node
 
         optimizer.zero_grad()
@@ -115,58 +113,86 @@ def run_movielens():
                               np.array(new_lables))
         loss.backward()
         optimizer.step()
-        # end_time = time.time()
-        # times.append(end_time - start_time)
-        # print(batch, loss.data)
     torch.save(graphsage.state_dict(), "../models/graphsage_ratings_model")
-    # val_output = graphsage.forward(train2)
 
-    # for i in val_output:
-    #     print(i)
-    # print("Validation F1:", f1_score(labels[val], val_output.data.numpy().argmax(axis=1), average="micro"))
-    # print("Average batch time:", np.mean(times))
 
-def save_embedings():
-    num_nodes = 2625
-    movie_nodes = 1682
-    user_nodes = 943
+def save_embedings(mode="scores"):
     feat_data, rating_list, adj_list = load_movielens()
     # print(labels)
-    features = nn.Embedding(num_nodes, num_nodes)
+    features = nn.Embedding(NODES_NUM, NODES_NUM)
     features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=True)
     features.cuda()
 
     agg1 = MeanAggregator(features, cuda=True)
-    enc1 = Encoder(features, num_nodes, 100, adj_list, agg1, gcn=True, cuda=True)
+    enc1 = Encoder(features, NODES_NUM, 100, adj_list, agg1, gcn=True, cuda=True)
     agg2 = MeanAggregator(lambda nodes: enc1(nodes).t(), cuda=True)
     enc2 = Encoder(lambda nodes: enc1(nodes).t(), enc1.embed_dim, 100, adj_list, agg2,
                    base_model=enc1, gcn=True, cuda=True)
     enc1.num_samples = 10
     enc2.num_samples = 10
 
-    dict_result = defaultdict()
-    temp_result = defaultdict()
+    dict_result = {}
+    temp_result = {}
     graphsage = SupervisedGraphSage(CLASS_NUM, enc2)
     graphsage.cuda()
     graphsage.load_state_dict(torch.load("../models/graphsage_ratings_model"))
-    for user_id in range(movie_nodes+1, user_nodes+movie_nodes+1):
-        for movie_id in range(1, movie_nodes+1):
-            movie_embeds, user_embeds, scores = graphsage.forward([movie_id], [user_id])
-            temp_result[movie_id] = scores.cpu().detach().numpy()
-            print(user_id, movie_id)
-        dict_result[user_id] = temp_result
-        temp_result = defaultdict()
-    output = open('scores.pkl', 'wb')
-    pickle.dump(dict_result, output)
-
-    # for node_id in range(1, num_nodes+1):
-    #     embedding = graphsage.embeddings([node_id])
-    #     embedding = embedding.cpu().detach().numpy()
-    #     np.save("../embedding_results/{}.npy".format(str(node_id)), embedding)
+    if mode == "scores":
+        for user_id in range(MOVIE_NUM, MOVIE_NUM+USER_NUM):
+            for movie_id in range(0, MOVIE_NUM):
+                movie_embeds, user_embeds, scores = graphsage.forward([movie_id], [user_id])
+                scores = torch.softmax(scores, dim=-1)
+                temp_result[movie_id] = float(scores.cpu().detach().numpy()[:, -1][0])
+                print(user_id, movie_id, scores.cpu().detach().numpy()[:, -1][0])
+            temp_result = sorted(temp_result.items(), key=lambda x: -x[1])[0:100]
+            dict_result[user_id] = temp_result
+            temp_result = {}
+        # print(dict_result)
+        with open('scores.json', 'w') as output:
+            json.dump(dict_result, output)
+    elif mode == "embedding":
+        feature_mat = np.zeros((100, NODES_NUM))
+        for node_id in range(0, NODES_NUM):
+            embedding = graphsage.embeddings([node_id])
+            embedding = embedding.cpu().detach().numpy()
+            feature_mat[:, node_id] = embedding.reshape(100,)
+        np.save("../embedding_results/{}.npy".format("feature_mat"), feature_mat)
         # print(node_id, embedding)
 
 
+def accuracy():
+    feat_data, rating_list, adj_list = load_movielens()
+    # print(labels)
+    features = nn.Embedding(NODES_NUM, NODES_NUM)
+    features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=True)
+    features.cuda()
+
+    agg1 = MeanAggregator(features, cuda=True)
+    enc1 = Encoder(features, NODES_NUM, 100, adj_list, agg1, gcn=True, cuda=True)
+    agg2 = MeanAggregator(lambda nodes: enc1(nodes).t(), cuda=True)
+    enc2 = Encoder(lambda nodes: enc1(nodes).t(), enc1.embed_dim, 100, adj_list, agg2,
+                   base_model=enc1, gcn=True, cuda=True)
+    enc1.num_samples = 10
+    enc2.num_samples = 10
+
+    graphsage = SupervisedGraphSage(CLASS_NUM, enc2)
+    graphsage.cuda()
+    graphsage.load_state_dict(torch.load("../models/graphsage_ratings_model"))
+    total = 0
+    acc = 0
+    for user_id in range(MOVIE_NUM + 1, MOVIE_NUM + 11):  # user_nodes+MOVIE_NUM
+        for movie_id in adj_list[user_id]:
+            movie_embeds, user_embeds, scores = graphsage.forward([movie_id], [user_id])
+            scores = torch.softmax(scores, dim=-1)
+            pred_label = np.argmax(scores.cpu().detach().numpy())
+            gdtruth_label = rating_list[(user_id, movie_id)]
+            total += 1
+            if pred_label == gdtruth_label:
+                acc += 1
+    print(acc/total * 1.0)
+
+
 if __name__ == "__main__":
-    # run_movielens()
-    save_embedings()
+    # accuracy()
+    run_movielens()
+    # save_embedings(mode="scores")
     # load_movielens()
